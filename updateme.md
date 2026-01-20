@@ -126,3 +126,5 @@ This file tracks all updates and improvements made to the SEO Tools project.
 ---
 
 *Last Updated: 2026-01-20*
+
+Added site heading extractor
