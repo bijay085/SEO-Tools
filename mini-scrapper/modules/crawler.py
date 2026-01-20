@@ -118,12 +118,45 @@ def _fetch_page(url: str) -> tuple[requests.Response | None, int | None, Excepti
 
 
 def _init_business_info() -> Dict[str, Any]:
-    """Initialize empty business info dict."""
+    """Initialize empty business info dict with all enhanced fields."""
     return {
-        "rating": None, "review_count": None, "addresses": [], "areas_served": [],
-        "hours": "", "phones": [], "quote_url": "", "services": [],
-        "has_coupon": False, "has_emergency": False, "is_licensed": False,
-        "license_number": "", "business_name": "", "founding_date": "", "founders": [],
+        # Basic info
+        "business_name": "",
+        "description": "",
+        "website": "",
+        "logo": "",
+        "images": [],
+        
+        # Contact info
+        "rating": None,
+        "review_count": None,
+        "addresses": [],
+        "address_components": [],
+        "areas_served": [],
+        "hours": "",
+        "phones": [],
+        "emails": [],
+        "quote_url": "",
+        
+        # Business details
+        "services": [],
+        "categories": [],
+        "price_range": "",
+        "payment_methods": [],
+        "languages": [],
+        
+        # Flags
+        "has_coupon": False,
+        "has_emergency": False,
+        "is_licensed": False,
+        "license_number": "",
+        
+        # Additional
+        "founding_date": "",
+        "founders": [],
+        "social_media": {},
+        "meta_description": "",
+        "meta_keywords": [],
     }
 
 

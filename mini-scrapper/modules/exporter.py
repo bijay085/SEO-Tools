@@ -74,22 +74,30 @@ def export_csv(business_info: Dict[str, Any], filename: Optional[str] = None,
     base_name = filename or "business_data"
     filepath = _create_filename(base_name, "csv", timestamp)
     
-    # Flatten business info for CSV
+    # Flatten business info for CSV with enhanced fields
     row = {
         "Business Name": business_info.get("business_name", ""),
+        "Description": business_info.get("description", "")[:500],  # Limit length
+        "Website": business_info.get("website", ""),
         "Rating": business_info.get("rating", ""),
         "Review Count": business_info.get("review_count", ""),
         "Address": "; ".join(business_info.get("addresses", [])) if business_info.get("addresses") else "",
         "Areas Served": "; ".join(business_info.get("areas_served", [])) if business_info.get("areas_served") else "",
         "Hours": business_info.get("hours", ""),
         "Phone": "; ".join(business_info.get("phones", [])) if business_info.get("phones") else "",
+        "Email": "; ".join(business_info.get("emails", [])) if business_info.get("emails") else "",
         "Quote URL": business_info.get("quote_url", ""),
         "Services": "; ".join(business_info.get("services", [])) if business_info.get("services") else "",
+        "Categories": "; ".join(business_info.get("categories", [])) if business_info.get("categories") else "",
+        "Price Range": business_info.get("price_range", ""),
+        "Payment Methods": "; ".join(business_info.get("payment_methods", [])) if business_info.get("payment_methods") else "",
+        "Languages": "; ".join(business_info.get("languages", [])) if business_info.get("languages") else "",
         "Has Coupon": "Yes" if business_info.get("has_coupon") else "No",
         "24/7 Emergency": "Yes" if business_info.get("has_emergency") else "No",
         "Licensed": "Yes" if business_info.get("is_licensed") else "No",
         "License Number": business_info.get("license_number", ""),
         "Founding Date": business_info.get("founding_date", ""),
+        "Social Media": "; ".join([f"{k}: {v}" for k, v in business_info.get("social_media", {}).items()]) if business_info.get("social_media") else "",
         "Founders": "; ".join([
             f"{f.get('name', '')} ({f.get('job_title', '')})" if f.get('job_title') 
             else f.get('name', '') 
@@ -146,24 +154,36 @@ def export_excel(business_info: Dict[str, Any], filename: Optional[str] = None,
     header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
     header_font = Font(bold=True, color="FFFFFF")
     
-    # Prepare data
+    # Prepare data with enhanced fields
     data = [
         ["Field", "Value"],
         ["Business Name", business_info.get("business_name", "")],
+        ["Description", business_info.get("description", "")[:500]],
+        ["Website", business_info.get("website", "")],
         ["Rating", f"{business_info.get('rating', '')}/5" if business_info.get("rating") else ""],
         ["Review Count", business_info.get("review_count", "")],
         ["Address", "; ".join(business_info.get("addresses", [])) if business_info.get("addresses") else ""],
         ["Areas Served", "; ".join(business_info.get("areas_served", [])) if business_info.get("areas_served") else ""],
         ["Hours", business_info.get("hours", "")],
         ["Phone", "; ".join(business_info.get("phones", [])) if business_info.get("phones") else ""],
+        ["Email", "; ".join(business_info.get("emails", [])) if business_info.get("emails") else ""],
         ["Quote URL", business_info.get("quote_url", "")],
         ["Services", "; ".join(business_info.get("services", [])) if business_info.get("services") else ""],
+        ["Categories", "; ".join(business_info.get("categories", [])) if business_info.get("categories") else ""],
+        ["Price Range", business_info.get("price_range", "")],
+        ["Payment Methods", "; ".join(business_info.get("payment_methods", [])) if business_info.get("payment_methods") else ""],
+        ["Languages", "; ".join(business_info.get("languages", [])) if business_info.get("languages") else ""],
         ["Has Coupon", "Yes" if business_info.get("has_coupon") else "No"],
         ["24/7 Emergency", "Yes" if business_info.get("has_emergency") else "No"],
         ["Licensed", "Yes" if business_info.get("is_licensed") else "No"],
         ["License Number", business_info.get("license_number", "")],
         ["Founding Date", business_info.get("founding_date", "")],
     ]
+    
+    # Add social media if available
+    if business_info.get("social_media"):
+        social_str = "; ".join([f"{k.capitalize()}: {v}" for k, v in business_info["social_media"].items()])
+        data.append(["Social Media", social_str])
     
     # Add founders row if available
     if business_info.get("founders"):
