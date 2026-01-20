@@ -1,0 +1,19 @@
+# SEO Tools - Python Dependencies
+# Install with: pip install -r requirements.txt
+
+# HTTP requests library
+requests>=2.28.0
+
+# HTML parsing library
+beautifulsoup4>=4.11.0
+
+# Fast XML/HTML parser (used by BeautifulSoup)
+lxml>=4.9.0
+
+# Colored terminal output
+colorama>=0.4.6
+
+# Optional: Excel export support
+# Install separately with: pip install openpyxl>=3.1.0
+# Note: Excel export will work without this, but will show an error message
+# when attempting to export to Excel format

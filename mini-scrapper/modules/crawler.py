@@ -4,6 +4,12 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import List, Set, Dict, Any
 import requests
+from requests.exceptions import (
+    Timeout,
+    ConnectionError,
+    HTTPError,
+    RequestException
+)
 
 from .config import load_config
 from .url_utils import get_domain, is_same_domain, is_path_excluded, contains_priority_path
@@ -13,6 +19,8 @@ from .schema_extractor import (
     extract_business_info, merge_business_info, format_business_report
 )
 from .file_handler import save_page_with_schema
+from .error_handler import retry_with_backoff, safe_execute, NetworkError, ParsingError
+from .logger import default_logger as logger
 from . import display
 
 REQUEST_TIMEOUT = 15
@@ -58,24 +66,97 @@ class CrawlResults:
         }
 
 
+@retry_with_backoff(max_retries=3, backoff_factor=1)
 def _fetch_page(url: str) -> tuple[requests.Response | None, int | None, Exception | None]:
-    """Fetch a page. Returns (response, status_code, error)."""
+    """
+    Fetch a page with retry logic. Returns (response, status_code, error).
+    
+    Args:
+        url: URL to fetch
+        
+    Returns:
+        Tuple of (response, status_code, error). One of response or error will be None.
+    """
     try:
+        logger.debug(f"Fetching page: {url}")
         resp = requests.get(url, timeout=REQUEST_TIMEOUT, headers={"User-Agent": USER_AGENT})
         resp.raise_for_status()
+        logger.debug(f"Successfully fetched {url} - Status: {resp.status_code}")
         return resp, resp.status_code, None
-    except requests.RequestException as e:
+    except HTTPError as e:
+        code = e.response.status_code if e.response else None
+        error_msg = f"HTTP error {code}: {e}"
+        logger.warning(f"HTTP error fetching {url}: Status {code} - {e}")
+        network_error = NetworkError(error_msg)
+        network_error.__cause__ = e
+        return None, code, network_error
+    except Timeout as e:
+        error_msg = f"Request timeout: {e}"
+        logger.warning(f"Timeout fetching {url}: {e}")
+        network_error = NetworkError(error_msg)
+        network_error.__cause__ = e
+        return None, None, network_error
+    except ConnectionError as e:
+        error_msg = f"Connection error: {e}"
+        logger.warning(f"Connection error fetching {url}: {e}")
+        network_error = NetworkError(error_msg)
+        network_error.__cause__ = e
+        return None, None, network_error
+    except RequestException as e:
         code = getattr(e.response, "status_code", None) if hasattr(e, "response") else None
-        return None, code, e
+        error_msg = f"Request failed: {e}"
+        logger.error(f"Request exception fetching {url}: {e}")
+        network_error = NetworkError(error_msg)
+        network_error.__cause__ = e
+        return None, code, network_error
+    except Exception as e:
+        error_msg = f"Unexpected error: {e}"
+        logger.error(f"Unexpected error fetching {url}: {e}", exc_info=True)
+        network_error = NetworkError(error_msg)
+        network_error.__cause__ = e
+        return None, None, network_error
 
 
 def _init_business_info() -> Dict[str, Any]:
-    """Initialize empty business info dict."""
+    """Initialize empty business info dict with all enhanced fields."""
     return {
-        "rating": None, "review_count": None, "addresses": [], "areas_served": [],
-        "hours": "", "phones": [], "quote_url": "", "services": [],
-        "has_coupon": False, "has_emergency": False, "is_licensed": False,
-        "license_number": "", "business_name": "", "founding_date": "", "founders": [],
+        # Basic info
+        "business_name": "",
+        "description": "",
+        "website": "",
+        "logo": "",
+        "images": [],
+        
+        # Contact info
+        "rating": None,
+        "review_count": None,
+        "addresses": [],
+        "address_components": [],
+        "areas_served": [],
+        "hours": "",
+        "phones": [],
+        "emails": [],
+        "quote_url": "",
+        
+        # Business details
+        "services": [],
+        "categories": [],
+        "price_range": "",
+        "payment_methods": [],
+        "languages": [],
+        
+        # Flags
+        "has_coupon": False,
+        "has_emergency": False,
+        "is_licensed": False,
+        "license_number": "",
+        
+        # Additional
+        "founding_date": "",
+        "founders": [],
+        "social_media": {},
+        "meta_description": "",
+        "meta_keywords": [],
     }
 
 
@@ -123,6 +204,8 @@ def scrape_business(start_url: str) -> Dict[str, Any]:
         response, status, error = _fetch_page(url)
         
         if error or status != 200:
+            error_msg = str(error) if error else "Unknown error"
+            logger.warning(f"Failed to fetch {url}: Status {status}, Error: {error_msg}")
             print(f"  [Status] {status or 'Failed'} - Skipped")
             continue
         
@@ -130,13 +213,28 @@ def scrape_business(start_url: str) -> Dict[str, Any]:
         scraped.add(url)
         scraped.add(url.rstrip("/"))
         
-        # Extract schemas
-        schemas = extract_json_ld_schemas(response.text)
+        # Extract schemas with error handling
+        schemas, parse_error = safe_execute(extract_json_ld_schemas, response.text)
+        if parse_error:
+            logger.warning(f"Error parsing schemas from {url}: {parse_error}")
+            schemas = []
+        else:
+            schemas = schemas or []
+        
         if schemas:
             print(f"  [Schema] Found {len(schemas)}")
+            logger.debug(f"Found {len(schemas)} schemas on {url}")
         
-        # Extract business info and merge
-        page_info = extract_business_info(schemas, response.text, base_url)
+        # Extract business info and merge with error handling
+        page_info, extract_error = safe_execute(
+            extract_business_info, schemas, response.text, base_url
+        )
+        if extract_error:
+            logger.warning(f"Error extracting business info from {url}: {extract_error}")
+            page_info = {}
+        else:
+            page_info = page_info or {}
+        
         merge_business_info(business_info, page_info)
     
     print(f"\n[Scraped {len(scraped)} pages]")
@@ -190,6 +288,8 @@ def scrape_priority_paths(start_url: str, max_pages: int = 1000) -> dict:
         display.print_status_code(status_code)
 
         if error:
+            error_msg = str(error) if error else "Unknown error"
+            logger.warning(f"Error fetching {url}: {error_msg}")
             display.print_error(f"Error - {error}")
             display.print_schema_check(False, False)
             display.print_separator()
@@ -200,13 +300,23 @@ def scrape_priority_paths(start_url: str, max_pages: int = 1000) -> dict:
         status = "Priority page" if is_priority else "Other page"
         display.print_crawl_status(status, is_priority=is_priority)
 
-        # Extract schemas
-        schemas = extract_json_ld_schemas(response.text)
+        # Extract schemas with error handling
+        schemas, parse_error = safe_execute(extract_json_ld_schemas, response.text)
+        if parse_error:
+            logger.warning(f"Error parsing schemas from {url}: {parse_error}")
+            schemas = []
+        else:
+            schemas = schemas or []
+        
         has_schema = len(schemas) > 0
         display.print_schema_check(True, has_schema, len(schemas))
 
         if has_schema:
-            save_page_with_schema(url, response.text, schemas)
+            save_result, save_error = safe_execute(
+                save_page_with_schema, url, response.text, schemas
+            )
+            if save_error:
+                logger.warning(f"Error saving page {url}: {save_error}")
 
         # Extract business info from pages with schemas (prioritize priority pages)
         if is_priority:
@@ -222,8 +332,14 @@ def scrape_priority_paths(start_url: str, max_pages: int = 1000) -> dict:
         
         # Extract and merge business info from any page with schemas
         if has_schema:
-            page_info = extract_business_info(schemas, response.text, base_url)
-            merge_business_info(results.business_info, page_info)
+            page_info, extract_error = safe_execute(
+                extract_business_info, schemas, response.text, base_url
+            )
+            if extract_error:
+                logger.warning(f"Error extracting business info from {url}: {extract_error}")
+            else:
+                if page_info:
+                    merge_business_info(results.business_info, page_info)
         
         # Check if we have ALL required info - stop only when ALL found OR no more pages to crawl
         info_complete = _is_business_info_complete(results.business_info)
@@ -236,8 +352,14 @@ def scrape_priority_paths(start_url: str, max_pages: int = 1000) -> dict:
 
         display.print_separator()
 
-        # Extract and queue links
-        links = extract_links(url, response.text)
+        # Extract and queue links with error handling
+        links, link_error = safe_execute(extract_links, url, response.text)
+        if link_error:
+            logger.warning(f"Error extracting links from {url}: {link_error}")
+            links = set()
+        else:
+            links = links or set()
+        
         new_count, external_count = 0, 0
         
         for link in links:
